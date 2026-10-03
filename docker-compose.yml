@@ -17,9 +17,10 @@ services:
     environment:
       THEORIARR_DATA: /data
       THEORIARR_PORT: ${THEORIARR_PORT:-6868}
-      # UID/GID the service runs as. The entrypoint starts as root, repairs the
-      # mounted volumes' ownership, then drops to these ids before starting the
-      # service, so the running process is never root.
+      # Only used when the container is started as root (e.g. `user: root`):
+      # the entrypoint then repairs the mounted volumes' ownership and drops to
+      # these ids. By default the service runs as the image's non-root `app`
+      # user (1654).
       PUID: ${PUID:-1654}
       PGID: ${PGID:-1654}
       TZ: ${TZ:-UTC}

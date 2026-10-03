@@ -108,10 +108,10 @@ COPY LICENSE NOTICE ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # /data backs the named volume; /transcode is the default transcode working
-# folder (mount a volume there to persist it). The entrypoint starts as root so
-# it can repair the ownership of a pre-existing or bind-mounted volume, then
-# drops privileges to PUID/PGID (default 1654) and runs the service as the
-# non-root `app` user.
+# folder (mount a volume there to persist it). The service runs as the non-root
+# `app` user (uid/gid 1654); the entrypoint only repairs ownership when the
+# container is started as root (`--user 0` / `user: root`), which is needed for
+# a root-owned or host bind-mounted /data.
 RUN mkdir -p /data /transcode \
  && chown -R app:app /app /data /transcode \
  && chmod +x ./theoriarr.sh ./theoriarr-stop.sh /usr/local/bin/docker-entrypoint.sh
@@ -123,9 +123,9 @@ EXPOSE 6868
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
   CMD curl -fsS "http://localhost:${THEORIARR_PORT:-6868}/ping" || exit 1
 
-# No USER directive: the entrypoint must start as root to chown a mounted
-# volume, then it drops to PUID/PGID (the non-root `app` user) with setpriv
-# before exec'ing the service. Starting with `--user <uid>` still works and
-# skips the remap.
+# Run as the non-root `app` user. Starting with `--user 0` / `user: root` lets
+# the entrypoint chown the mounted volumes, after which it drops back to `app`.
+USER app
+
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["./theoriarr.sh", "--attach"]

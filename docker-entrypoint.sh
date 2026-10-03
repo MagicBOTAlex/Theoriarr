@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # Theoriarr container entrypoint.
 #
-# The image sets no USER, so the entrypoint starts as root: that is the only way
-# it can repair the ownership of a pre-existing or bind-mounted /data volume.
-# It then drops privileges to PUID/PGID and runs the service as the non-root
-# `app` user, so the long-running process is never root.
+# The image runs the service as the non-root `app` user (uid/gid 1654) by
+# default. It only repairs volume ownership when the container is started as
+# root (`--user 0`, or `user: root` in compose): it then chowns the mounted
+# volumes, swaps to PUID/PGID and execs the service with setpriv, so the
+# long-running process is never root. This is only needed for a root-owned or
+# host bind-mounted /data.
 #
-#   PUID / PGID  UID/GID the service runs as (default: the image's `app` user)
+#   PUID / PGID  UID/GID the service runs as when started as root
+#              (default: the image's `app` user)
 #   TZ           timezone, e.g. Europe/Amsterdam
 #
-# If the container is started directly as an unprivileged user (`--user`), the
-# remap is skipped and the caller's uid/gid is honoured.
+# Starting as an unprivileged user (the default) skips the remap and honours the
+# caller's uid/gid.
 #
 # Privileges are dropped with `setpriv --init-groups` (never `--clear-groups`)
 # so the service keeps the supplementary groups it was granted at image build

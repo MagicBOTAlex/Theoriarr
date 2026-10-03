@@ -61,7 +61,8 @@ Building requires the .NET SDK 10 and Node 24 (Node is only needed to build the 
 
 The image is published on Docker Hub as
 [`magicbotalex2/theoriarr`](https://hub.docker.com/r/magicbotalex2/theoriarr) (`:latest`, or
-`:Debug` for the debug-only diagnostics endpoint). A minimal `docker-compose.yml`:
+`:Debug` for the debug-only diagnostics endpoint). The service runs as the non-root `app` user
+(uid/gid 1654). A minimal `docker-compose.yml`:
 
 ```yaml
 services:
@@ -72,28 +73,26 @@ services:
     ports:
       - "6868:6868"
     environment:
-      PUID: 1654 # uid the service runs as (match your host user)
-      PGID: 1654 # gid the service runs as
       TZ: UTC
+      # THEORIARR_DISABLE_AUTH: "true"   # skip the login page; API-key auth is unaffected
     volumes:
-      - theoriarr-data:/data
-      - theoriarr-transcode:/transcode
-
-volumes:
-  theoriarr-data:
-  theoriarr-transcode:
+      - ./config:/data
+      - ./transcode:/transcode
 ```
 
 ```bash
-docker compose up -d          # pulls magicbotalex2/theoriarr:latest
+mkdir -p config transcode
+sudo chown -R 1654:1654 config transcode   # the container's non-root `app` uid/gid
+docker compose up -d
 ```
 
-The entrypoint starts as root only to repair the ownership of the mounted volumes, then drops to
-the non-root `app` user (uid/gid 1654, override with `PUID`/`PGID`) for the service itself. It
-listens on `:6868` and keeps config, databases, logs and media metadata in the `theoriarr-data`
-volume (transcode scratch lives in `theoriarr-transcode`). The bundled
-[`docker-compose.yml`](docker-compose.yml) adds the optional NVIDIA / VA-API GPU blocks; build from
-source instead with `docker compose up -d --build`.
+Config, databases, logs and media metadata live in `/data`; transcode scratch in `/transcode`.
+A named volume (`theoriarr-data:/data`) avoids the `chown`, because Docker seeds it with the image's
+ownership. If `/data` is root-owned (e.g. Docker created the bind-mount source, or you upgraded from
+an older image), start once as root so the entrypoint repairs ownership — run it with `user: root`
+(or `docker run --user 0`) one time — then drop it. The bundled
+[`docker-compose.yml`](docker-compose.yml) also has the optional NVIDIA / VA-API GPU blocks and can
+build from source with `docker compose up -d --build`.
 
 ### Nix
 
