@@ -1,23 +1,20 @@
 #!/usr/bin/env bash
-# Theoriarr container entrypoint.
+# Theoriarr container entrypoint (LinuxServer.io-style).
 #
-# The image runs the service as the non-root `app` user (uid/gid 1654) by
-# default. It only repairs volume ownership when the container is started as
-# root (`--user 0`, or `user: root` in compose): it then chowns the mounted
-# volumes, swaps to PUID/PGID and execs the service with setpriv, so the
-# long-running process is never root. This is only needed for a root-owned or
-# host bind-mounted /data.
+# The container starts as root and drops to the non-root service user. On start
+# it reads PUID/PGID, remaps the image's `app` user to those ids, fixes the
+# ownership of /app and the mounted volumes, then execs the service as that user
+# (the long-running process is never root).
 #
-#   PUID / PGID  UID/GID the service runs as when started as root
-#              (default: the image's `app` user)
+#   PUID / PGID  UID/GID the service runs as (default: the image's `app` user)
 #   TZ           timezone, e.g. Europe/Amsterdam
 #
-# Starting as an unprivileged user (the default) skips the remap and honours the
-# caller's uid/gid.
+# Starting the container directly as an unprivileged user (Docker `--user`)
+# skips the remap and honours the caller's uid/gid.
 #
-# Privileges are dropped with `setpriv --init-groups` (never `--clear-groups`)
-# so the service keeps the supplementary groups it was granted at image build
-# time (notably video/render for /dev/dri GPU transcoding).
+# Supplementary groups the caller was granted (e.g. Docker `group_add`) are
+# preserved and merged with the service user's own groups, so /dev/dri access
+# keeps working when the host gids differ from the image's.
 set -euo pipefail
 
 PUID="${PUID:-1654}"
@@ -32,6 +29,11 @@ TRANSCODE="${THEORIARR_TRANSCODE_TEMP_FOLDER:-$DATA/transcode}"
 export HOME="${HOME:-/home/app}"
 
 if [ "$(id -u)" = "0" ]; then
+  # Extra supplementary groups the caller was granted (e.g. Docker `group_add`),
+  # excluding the root group; merged into the service user's groups below.
+  extra_groups="$(id -G | tr ' ' '\n' | grep -vx '0' | tr '\n' ',' || true)"
+  extra_groups="${extra_groups%,}"
+
   if [ -n "${TZ:-}" ]; then
     if [ -f "/usr/share/zoneinfo/$TZ" ]; then
       ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime
@@ -58,24 +60,28 @@ if [ "$(id -u)" = "0" ]; then
 
   mkdir -p "$DATA" /app/_run "$TRANSCODE"
 
-  # /app is owned by the image's original uid, so only re-map the whole tree
-  # when the service uid/gid actually changed; /app/_run is always handed over
-  # so pidfiles/logs can be written.
+  # /app is owned by the image's original uid, so re-map the whole tree when the
+  # service uid/gid changed; /app/_run is always handed over so pidfiles/logs
+  # (and the SPA the launcher stages into the backend output tree) can be
+  # written. $DATA/$TRANSCODE may be pre-existing/bind-mounted, so repair them
+  # recursively on every start.
   if [ "$PUID" != "$current_uid" ] || [ "$PGID" != "$current_gid" ]; then
     chown -R app:app /app
   else
     chown app:app /app/_run
   fi
-
-  # $DATA and $TRANSCODE may be pre-existing, root-owned volumes from an earlier
-  # image or host bind mounts. Repair them recursively on every start so
-  # upgrades (and bind mounts) work. They hold state, not the app image, so the
-  # cost tracks the data size rather than the image.
   chown -R app:app /home/app "$DATA" "$TRANSCODE"
 
-  # --init-groups rebuilds the supplementary group list from /etc/group for the
-  # target uid, preserving video/render (GPU) membership after the switch.
-  exec setpriv --reuid "$PUID" --regid "$PGID" --init-groups "$@"
+  # Merge the service user's own groups with the caller's extra groups.
+  app_groups="$(id -G app | tr ' ' ',')"
+  if [ -n "$extra_groups" ]; then
+    supp="$(printf '%s,%s\n' "$app_groups" "$extra_groups" | tr ',' '\n' | sort -un | tr '\n' ',')"
+    supp="${supp%,}"
+  else
+    supp="$app_groups"
+  fi
+
+  exec setpriv --reuid "$PUID" --regid "$PGID" --groups "$supp" "$@"
 fi
 
 # Already running as an unprivileged user (explicit `--user`); we cannot

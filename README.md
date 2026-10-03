@@ -61,8 +61,10 @@ Building requires the .NET SDK 10 and Node 24 (Node is only needed to build the 
 
 The image is published on Docker Hub as
 [`magicbotalex2/theoriarr`](https://hub.docker.com/r/magicbotalex2/theoriarr) (`:latest`, or
-`:Debug` for the debug-only diagnostics endpoint). The service runs as the non-root `app` user
-(uid/gid 1654). A minimal `docker-compose.yml`:
+`:Debug` for the debug-only diagnostics endpoint). It follows the LinuxServer.io pattern: the
+container starts as root, remaps `PUID`/`PGID`, fixes the ownership of `/data` and `/app`, then
+drops privileges to that user for the service. Set `PUID`/`PGID` to the owner of your config folder
+(`id -u` / `id -g`). A minimal `docker-compose.yml`:
 
 ```yaml
 services:
@@ -73,6 +75,8 @@ services:
     ports:
       - "6868:6868"
     environment:
+      PUID: 1000 # uid that owns ./config (id -u)
+      PGID: 1000 # gid that owns ./config (id -g)
       TZ: UTC
       # THEORIARR_DISABLE_AUTH: "true"   # skip the login page; API-key auth is unaffected
     volumes:
@@ -81,16 +85,12 @@ services:
 ```
 
 ```bash
-mkdir -p config transcode
-sudo chown -R 1654:1654 config transcode   # the container's non-root `app` uid/gid
-docker compose up -d
+docker compose up -d          # pulls magicbotalex2/theoriarr:latest
 ```
 
 Config, databases, logs and media metadata live in `/data`; transcode scratch in `/transcode`.
-A named volume (`theoriarr-data:/data`) avoids the `chown`, because Docker seeds it with the image's
-ownership. If `/data` is root-owned (e.g. Docker created the bind-mount source, or you upgraded from
-an older image), start once as root so the entrypoint repairs ownership — run it with `user: root`
-(or `docker run --user 0`) one time — then drop it. The bundled
+Because the entrypoint repairs ownership on start, root-owned or freshly created bind-mount folders
+work without a manual `chown`, and the service still runs as the non-root `PUID`/`PGID`. The bundled
 [`docker-compose.yml`](docker-compose.yml) also has the optional NVIDIA / VA-API GPU blocks and can
 build from source with `docker compose up -d --build`.
 
