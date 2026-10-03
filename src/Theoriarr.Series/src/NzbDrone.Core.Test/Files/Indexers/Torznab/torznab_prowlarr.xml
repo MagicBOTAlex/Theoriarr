@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <atom:link href="https://prowlarr.local/1/api" rel="self" type="application/rss+xml" />
+    <title>Prowlarr</title>
+    <item>
+      <title>Movie One 2020 1080p BluRay x264-GROUP</title>
+      <pubDate>Mon, 15 May 2017 19:15:56 +0000</pubDate>
+      <guid isPermaLink="true">prowlarr-magnet</guid>
+      <comments>https://prowlarr.local/details/1</comments>
+      <link>https://prowlarr.local/download/1</link>
+      <size>1234567890</size>
+      <category>2000</category>
+      <enclosure url="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&amp;dn=Movie+One" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+      <torznab:attr name="seeders" value="10" />
+      <torznab:attr name="peers" value="20" />
+    </item>
+    <item>
+      <title>Movie Two 2021 1080p WEB-DL DD5.1 H.264-GROUP</title>
+      <pubDate>Mon, 15 May 2017 19:15:56 +0000</pubDate>
+      <guid isPermaLink="true">prowlarr-tags</guid>
+      <comments>https://prowlarr.local/details/2</comments>
+      <link>https://prowlarr.local/download/2</link>
+      <size>2345678901</size>
+      <category>2000</category>
+      <enclosure url="https://prowlarr.local/download/2.torrent" length="2345678901" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+      <torznab:attr name="subs" value="eng" />
+      <torznab:attr name="tag" value="internal" />
+      <torznab:attr name="tag" value="scene" />
+      <torznab:attr name="tag" value="freeleech" />
+      <torznab:attr name="tag" value="subs" />
+      <torznab:attr name="tag" value="exclusive" />
+      <torznab:attr name="tag" value="neutralleech" />
+    </item>
+    <item>
+      <title>Movie Three 2022 720p HDTV x264-GROUP</title>
+      <pubDate>Mon, 15 May 2017 19:15:56 +0000</pubDate>
+      <guid isPermaLink="true">prowlarr-size</guid>
+      <comments>https://prowlarr.local/details/3</comments>
+      <link>https://prowlarr.local/download/3</link>
+      <size>3456789012</size>
+      <category>2000</category>
+      <enclosure url="https://prowlarr.local/download/3.torrent" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+    </item>
+  </channel>
+</rss>

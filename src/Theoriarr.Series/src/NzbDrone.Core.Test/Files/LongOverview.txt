@@ -1,0 +1,33 @@
+﻿Synthetic overview fixture used to exercise long-string truncation. This text is
+original placeholder prose and contains no third-party copyrighted material.
+
+The harbour town woke slowly, its rooftops catching the first pale light of a
+morning that promised rain. Merchant carts creaked along the cobbled square
+while gulls argued over scraps near the fish market. In a narrow workshop above
+the chandlery, a clockmaker named Elena sorted tiny brass gears by size, each
+one polished until it threw back the grey daylight in soft rings.
+
+Across the square, the town archive opened its heavy doors. Its keeper, an
+unhurried man named Corin, had spent thirty years cataloguing letters, ledgers,
+and maps that nobody asked for. He believed every discarded page mattered, that
+a town without its records was a town without a memory. Today a stranger would
+arrive with a sealed box, and that belief would be tested.
+
+Elena and Corin had grown up two streets apart but had scarcely spoken since
+childhood, divided by the ordinary distances that accumulate between people who
+never had a reason to bridge them. The box would give them a reason. Inside
+were plans for a device neither of them recognised, drawn in a hand that
+matched the oldest maps in the archive.
+
+What followed was not a grand adventure but a patient, stubborn collaboration:
+late nights, arguments over tea, and the slow discovery that a small town can
+hold more secrets than any capital. By the time the rain finally came, the
+square was empty, the workshop dark, and two people who had begun as strangers
+had become the only ones who understood what the device was for.
+
+The story resists easy endings. Some knots stay tied, some questions remain
+open, and the archive keeps growing regardless. But on that first grey morning,
+none of that was visible yet; there were only brass gears, an unopened box,
+and the quiet certainty that the past was about to ask something of the
+present. This paragraph exists to push the fixture comfortably past one
+thousand bytes so the truncation test has enough material to cut.

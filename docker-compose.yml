@@ -1,0 +1,75 @@
+services:
+  theoriarr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Release (default) or Debug. Debug enables the debug-only, anonymous
+        # diagnostics dump: `CONFIGURATION=Debug docker compose up -d --build`.
+        CONFIGURATION: ${CONFIGURATION:-Release}
+    image: magicbotalex2/theoriarr:${CONFIGURATION:-latest}
+    container_name: theoriarr
+    restart: unless-stopped
+    ports:
+      # The one unified Theoriarr listener: UI + both API domains
+      # (selected per request by API key).
+      - "${THEORIARR_PORT:-6868}:${THEORIARR_PORT:-6868}"
+    environment:
+      THEORIARR_DATA: /data
+      THEORIARR_PORT: ${THEORIARR_PORT:-6868}
+      # UID/GID the service runs as. The entrypoint starts as root, repairs the
+      # mounted volumes' ownership, then drops to these ids before starting the
+      # service, so the running process is never root.
+      PUID: ${PUID:-1654}
+      PGID: ${PGID:-1654}
+      TZ: ${TZ:-UTC}
+      # Set to 1/true/yes to disable the login page (no authentication). The
+      # API-key auth (Prowlarr/Jellyseerr) is unaffected.
+      THEORIARR_DISABLE_AUTH: ${THEORIARR_DISABLE_AUTH:-false}
+      # Transcode working folder (large temp files). It lives in its own volume
+      # below so it survives restarts; point it at another mounted path to move
+      # it (e.g. a fast SSD).
+      THEORIARR_TRANSCODE_TEMP_FOLDER: ${THEORIARR_TRANSCODE_TEMP_FOLDER:-/transcode}
+    volumes:
+      # Config, databases, logs and media metadata.
+      - theoriarr-data:/data
+      # Transcode working folder, kept out of the config volume. To put it on a
+      # specific host disk instead, replace with a bind mount:
+      #   - /path/on/host/transcode:/transcode
+      - theoriarr-transcode:/transcode
+    # Media compression (Settings -> Compression) uses the ffmpeg bundled in the
+    # image. To expose GPUs to the container, uncomment the blocks below:
+    #
+    # NVIDIA (needs the NVIDIA Container Toolkit on the host + `--gpus` support):
+    #   environment:
+    #     NVIDIA_VISIBLE_DEVICES: all
+    #     NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    #   deploy:
+    #     resources:
+    #       reservations:
+    #         devices:
+    #           - driver: nvidia
+    #             count: all
+    #             capabilities: [gpu, video]
+    #
+    # AMD iGPU VA-API (pass the render node through; the app vendor-matches it).
+    # The image's `app` user is already a member of the host video/render groups
+    # and the entrypoint preserves them, so no `group_add` is normally needed.
+    # If the host uses different GIDs, add them explicitly:
+    #   devices:
+    #     - /dev/dri:/dev/dri
+    #   group_add:
+    #     - "44"    # video
+    #     - "109"   # render (Debian)
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS "http://localhost:${THEORIARR_PORT:-6868}/ping" || exit 1
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 5
+
+volumes:
+  theoriarr-data:
+  theoriarr-transcode:

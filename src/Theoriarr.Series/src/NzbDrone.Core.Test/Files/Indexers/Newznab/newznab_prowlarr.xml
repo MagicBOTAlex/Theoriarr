@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
+  <channel>
+    <title>Prowlarr</title>
+    <item>
+      <title>Movie One 2020 1080p WEB-DL DD5.1 H.264-GROUP</title>
+      <pubDate>Mon, 15 May 2017 19:15:56 +0000</pubDate>
+      <guid isPermaLink="true">prowlarr-size</guid>
+      <comments>https://prowlarr.local/details/1</comments>
+      <link>https://prowlarr.local/download/1</link>
+      <size>4567890123</size>
+      <category>2000</category>
+      <enclosure url="https://prowlarr.local/download/1.nzb" type="application/x-nzb" />
+      <newznab:attr name="category" value="2000" />
+      <newznab:attr name="tag" value="internal" />
+    </item>
+  </channel>
+</rss>

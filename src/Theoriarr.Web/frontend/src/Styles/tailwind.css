@@ -1,0 +1,166 @@
+@layer theme, base;
+
+@import 'tailwindcss/theme.css' layer(theme);
+
+@import 'tailwindcss/preflight.css' layer(base);
+
+@import 'tailwindcss/utilities.css';
+
+/*
+ * daisyUI is used for the application shell (header/sidebar/page layouts).
+ * Built-in themes are disabled; Theoriarr ships two native daisyUI themes that
+ * mirror the palette in Styles/Themes/{light,dark}.js. ApplyTheme selects one
+ * by setting `data-theme` on <html>.
+ */
+
+@plugin "daisyui" {
+  themes: false;
+  logs: false;
+}
+
+@plugin "daisyui/theme" {
+  --color-base-100: #f5f7fa;
+  --color-base-200: #fff;
+  --color-base-300: #e4eaec;
+  --color-base-content: #515253;
+  --color-primary: #35c5f4;
+  --color-primary-content: #06222c;
+  --color-secondary: #7a43b6;
+  --color-secondary-content: #fff;
+  --color-accent: #2193b5;
+  --color-accent-content: #fff;
+  --color-neutral: #3a3f51;
+  --color-neutral-content: #e1e2e3;
+  --color-info: #5d9cec;
+  --color-info-content: #fff;
+  --color-success: #27c24c;
+  --color-success-content: #fff;
+  --color-warning: #ff902b;
+  --color-warning-content: #241a00;
+  --color-error: #f05050;
+  --color-error-content: #fff;
+  --radius-selector: 0.25rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+
+  name: "theoriarr-light";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+}
+
+@plugin "daisyui/theme" {
+  --color-base-100: #202020;
+  --color-base-200: #2a2a2a;
+  --color-base-300: #333;
+  --color-base-content: #ccc;
+  --color-primary: #35c5f4;
+  --color-primary-content: #06222c;
+  --color-secondary: #7a43b6;
+  --color-secondary-content: #fff;
+  --color-accent: #2193b5;
+  --color-accent-content: #fff;
+  --color-neutral: #2a2a2a;
+  --color-neutral-content: #e1e2e3;
+  --color-info: #5d9cec;
+  --color-info-content: #fff;
+  --color-success: #00853d;
+  --color-success-content: #fff;
+  --color-warning: #ffa500;
+  --color-warning-content: #241a00;
+  --color-error: #f05050;
+  --color-error-content: #fff;
+  --radius-selector: 0.25rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+
+  name: "theoriarr-dark";
+  default: false;
+  prefersdark: false;
+  color-scheme: dark;
+}
+
+@source "../";
+
+/*
+ * Base layer folded in from the former Styles/scaffolding.css and index.css so
+ * the last hand-written stylesheets live in the Tailwind entry point. Tailwind
+ * preflight (imported above) provides the reset; these are the app overrides.
+ */
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    color: var(--textColor);
+    font-family: 'Roboto', 'open sans', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+  }
+
+  body {
+    overflow: hidden;
+    background-color: var(--pageBackground);
+    font-size: 14px;
+    line-height: 1.528571429; /* 20/14 */
+  }
+
+  /* stylelint-disable-next-line selector-max-universal */
+  *:focus {
+    outline: none;
+  }
+
+  button,
+  input,
+  optgroup,
+  select,
+  textarea {
+    margin: 0;
+    font-size: inherit;
+    font-family: inherit;
+    line-height: 1.528571429; /* 20/14 */
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 20px;
+    list-style: revert;
+  }
+  @media only screen and (max-width: 768px) {
+    body {
+      overflow-y: auto;
+    }
+  }
+  @media only screen and (min-device-width: 375px) and (max-device-width: 812px) {
+    input,
+    optgroup,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+}
+
+@keyframes rippleContainer {
+  0% {
+    opacity: 1;
+    transform: scale(0.1);
+  }
+
+  70% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+
+  100% {
+    opacity: 0;
+  }
+}

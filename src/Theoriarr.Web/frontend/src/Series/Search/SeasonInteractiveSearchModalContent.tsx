@@ -1,0 +1,63 @@
+import React from 'react';
+import Button from 'Components/Link/Button';
+import ModalBody from 'Components/Modal/ModalBody';
+import ModalContent from 'Components/Modal/ModalContent';
+import ModalFooter from 'Components/Modal/ModalFooter';
+import ModalHeader from 'Components/Modal/ModalHeader';
+import { scrollDirections } from 'Helpers/Props';
+import InteractiveSearch from 'InteractiveSearch/InteractiveSearch';
+import { useClearReleasesOnUnmount } from 'InteractiveSearch/useReleases';
+import formatSeason from 'Season/formatSeason';
+import translate from 'Utilities/String/translate';
+
+const FOOTER_EXTRA_CLASS = 'justify-between!';
+
+export interface SeasonInteractiveSearchModalContentProps {
+  episodeCount: number;
+  seriesId: number;
+  seasonNumber: number;
+  onModalClose(): void;
+}
+
+function SeasonInteractiveSearchModalContent({
+  episodeCount,
+  seriesId,
+  seasonNumber,
+  onModalClose,
+}: SeasonInteractiveSearchModalContentProps) {
+  useClearReleasesOnUnmount({ seriesId, seasonNumber });
+
+  return (
+    <ModalContent onModalClose={onModalClose}>
+      <ModalHeader>
+        {seasonNumber === null
+          ? translate('InteractiveSearchModalHeader')
+          : translate('InteractiveSearchModalHeaderSeason', {
+              season: formatSeason(seasonNumber) as string,
+            })}
+      </ModalHeader>
+
+      <ModalBody innerClassName="p-4" scrollDirection={scrollDirections.BOTH}>
+        <InteractiveSearch
+          type="season"
+          searchPayload={{
+            seriesId,
+            seasonNumber,
+          }}
+        />
+      </ModalBody>
+
+      <ModalFooter className={FOOTER_EXTRA_CLASS}>
+        <div>
+          {translate('EpisodesInSeason', {
+            episodeCount,
+          })}
+        </div>
+
+        <Button onPress={onModalClose}>{translate('Close')}</Button>
+      </ModalFooter>
+    </ModalContent>
+  );
+}
+
+export default SeasonInteractiveSearchModalContent;

@@ -1,0 +1,32 @@
+using System.Collections.Generic;
+using Microsoft.AspNetCore.Mvc;
+using NzbDrone.Core.MediaFiles;
+using Sonarr.Http;
+using Sonarr.Http.REST;
+using Sonarr.Http.Subsystem;
+
+namespace Sonarr.Api.V3.Movies
+{
+    [AppSubsystem(AppSubsystem.Movies)]
+    [V3ApiController("rename")]
+    public class RenameMovieController : Controller
+    {
+        private readonly IRenameMovieFileService _renameMovieFileService;
+
+        public RenameMovieController(IRenameMovieFileService renameMovieFileService)
+        {
+            _renameMovieFileService = renameMovieFileService;
+        }
+
+        [HttpGet]
+        public List<RenameMovieResource> GetMovies([FromQuery(Name = "movieId")] List<int> movieIds)
+        {
+            if (movieIds is not { Count: not 0 })
+            {
+                throw new BadRequestException("movieId must be provided");
+            }
+
+            return _renameMovieFileService.GetRenamePreviews(movieIds).ToResource();
+        }
+    }
+}

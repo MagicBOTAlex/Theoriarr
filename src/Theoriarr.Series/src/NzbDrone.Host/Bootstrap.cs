@@ -1,0 +1,369 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Security;
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using DryIoc;
+using DryIoc.Microsoft.DependencyInjection;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
+using Microsoft.Extensions.Logging;
+using NLog;
+using NzbDrone.Common.Composition.Extensions;
+using NzbDrone.Common.EnvironmentInfo;
+using NzbDrone.Common.Exceptions;
+using NzbDrone.Common.Extensions;
+using NzbDrone.Common.Http;
+using NzbDrone.Common.Instrumentation;
+using NzbDrone.Common.Instrumentation.Extensions;
+using NzbDrone.Common.Options;
+using NzbDrone.Core.Configuration;
+using NzbDrone.Core.Datastore.Extensions;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
+
+using PostgresOptions = NzbDrone.Core.Datastore.PostgresOptions;
+
+namespace NzbDrone.Host
+{
+    public static class Bootstrap
+    {
+        private static readonly Logger Logger = NzbDroneLogger.GetLogger(typeof(Bootstrap));
+
+        public static readonly List<string> ASSEMBLIES = new()
+        {
+            "Sonarr.Host",
+            "Sonarr.Core",
+            "Sonarr.SignalR",
+            "Sonarr.Api.V3",
+            "Sonarr.Api.V5",
+            "Sonarr.Http"
+        };
+
+        // Unified config section first, then the legacy per-product sections as fallback.
+        // The movie domain lives in the same Sonarr.Core/API assemblies, so this single list
+        // drives one DryIoc composition with no duplicate registrations.
+        private static readonly string[] ConfigSectionPrefixes = { "Theoriarr", "Sonarr", "Radarr" };
+
+        public static void Start(string[] args, Action<IHostBuilder> trayCallback = null)
+        {
+            try
+            {
+                Logger.Info("Starting Theoriarr - {0} - Version {1}",
+                            Environment.ProcessPath,
+                            Assembly.GetExecutingAssembly().GetName().Version);
+
+                var startupContext = new StartupContext(args);
+                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+                var appMode = GetApplicationMode(startupContext);
+                var config = GetConfiguration(startupContext);
+
+                if (appMode is not (ApplicationModes.Interactive or ApplicationModes.Service))
+                {
+                    RunUtilityMode(appMode, startupContext, config);
+                    return;
+                }
+
+                RunHostUntilShutdown(args, startupContext, appMode, trayCallback);
+
+                Logger.Info("Theoriarr has shut down completely");
+            }
+            catch (InvalidConfigFileException ex)
+            {
+                throw new SonarrStartupException(ex);
+            }
+            catch (TerminateApplicationException e)
+            {
+                Logger.Info(e.Message);
+                LogManager.Configuration = null;
+            }
+        }
+
+        private static void RunUtilityMode(ApplicationModes appMode, StartupContext startupContext, IConfiguration config)
+        {
+            Logger.Debug("Utility mode: {0}", appMode);
+
+            new HostBuilder()
+                .UseServiceProviderFactory(new DryIocServiceProviderFactory(new Container(rules => rules.WithNzbDroneRules())))
+                .ConfigureContainer<IContainer>(c =>
+                {
+                    c.AutoAddServices(ASSEMBLIES)
+                        .AddNzbDroneLogger()
+                        .AddDatabase()
+                        .AddStartupContext(startupContext)
+                        .Resolve<UtilityModeRouter>()
+                        .Route(appMode);
+
+                    if (config.GetValue(nameof(ConfigFileProvider.LogDbEnabled), true))
+                    {
+                        c.AddLogDatabase();
+                    }
+                    else
+                    {
+                        c.AddDummyLogDatabase();
+                    }
+                })
+                .ConfigureServices(services =>
+                {
+                    ConfigureOptions(services, config);
+                })
+                .Build();
+        }
+
+        private static void RunHostUntilShutdown(string[] args, StartupContext startupContext, ApplicationModes appMode, Action<IHostBuilder> trayCallback)
+        {
+            Logger.Debug("Starting in {0} mode", trayCallback != null ? "Tray" : appMode.ToString());
+
+            bool shouldRestart;
+            do
+            {
+                var builder = CreateConsoleHostBuilder(args, startupContext);
+                trayCallback?.Invoke(builder);
+
+                shouldRestart = RunWithRestartCheck(builder.Build());
+
+                if (shouldRestart)
+                {
+                    Logger.Info("Application restart requested, reinitializing host");
+                    NzbDroneLogger.ResetAllTargets(startupContext, false, true);
+                    Thread.Sleep(1000);
+                }
+            }
+            while (shouldRestart);
+        }
+
+        public static IHostBuilder CreateConsoleHostBuilder(string[] args, StartupContext context)
+        {
+            var config = GetConfiguration(context);
+
+            var bindAddress = GetServerValue<string>(config, nameof(ServerOptions.BindAddress)) ?? config.GetValue(nameof(ConfigFileProvider.BindAddress), "*");
+            var port = GetServerValue<int?>(config, nameof(ServerOptions.Port)) ?? config.GetValue(nameof(ConfigFileProvider.Port), 6868);
+            var sslPort = GetServerValue<int?>(config, nameof(ServerOptions.SslPort)) ?? config.GetValue(nameof(ConfigFileProvider.SslPort), 9898);
+            var enableSsl = GetServerValue<bool?>(config, nameof(ServerOptions.EnableSsl)) ?? config.GetValue(nameof(ConfigFileProvider.EnableSsl), false);
+            var sslCertPath = GetServerValue<string>(config, nameof(ServerOptions.SslCertPath)) ?? config.GetValue<string>(nameof(ConfigFileProvider.SslCertPath));
+            var sslKeyPath = GetServerValue<string>(config, nameof(ServerOptions.SslKeyPath)) ?? config.GetValue<string>(nameof(ConfigFileProvider.SslKeyPath));
+            var sslCertPassword = GetServerValue<string>(config, nameof(ServerOptions.SslCertPassword)) ?? config.GetValue<string>(nameof(ConfigFileProvider.SslCertPassword));
+            var logDbEnabled = GetSectionValue<bool?>(config, "Log", nameof(LogOptions.DbEnabled)) ?? config.GetValue(nameof(ConfigFileProvider.LogDbEnabled), true);
+
+            var urls = new List<string> { BuildUrl("http", bindAddress, port) };
+
+            if (enableSsl && sslCertPath.IsNotNullOrWhiteSpace())
+            {
+                urls.Add(BuildUrl("https", bindAddress, sslPort));
+            }
+
+            return new HostBuilder()
+                .UseContentRoot(Directory.GetCurrentDirectory())
+                .UseServiceProviderFactory(new DryIocServiceProviderFactory(new Container(rules => rules.WithNzbDroneRules())))
+                .ConfigureLogging(logging =>
+                {
+                    logging.AddFilter("Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware", LogLevel.None);
+                })
+                .ConfigureContainer<IContainer>(c =>
+                {
+                    c.AutoAddServices(Bootstrap.ASSEMBLIES)
+                        .AddNzbDroneLogger()
+                        .AddDatabase()
+                        .AddStartupContext(context);
+
+                    if (logDbEnabled)
+                    {
+                        c.AddLogDatabase();
+                    }
+                    else
+                    {
+                        c.AddDummyLogDatabase();
+                    }
+                })
+                .ConfigureServices(services =>
+                {
+                    ConfigureOptions(services, config);
+                })
+                .ConfigureWebHost(builder =>
+                {
+                    builder.UseConfiguration(config);
+                    builder.UseUrls(urls.ToArray());
+                    builder.UseKestrel(options =>
+                    {
+                        if (enableSsl && sslCertPath.IsNotNullOrWhiteSpace())
+                        {
+                            options.ConfigureHttpsDefaults(configureOptions =>
+                            {
+                                var sslContext = ValidateSslCertificate(sslCertPath, sslKeyPath, sslCertPassword);
+
+                                configureOptions.ServerCertificate = sslContext.TargetCertificate;
+                                configureOptions.OnAuthenticate = (_, authOptions) =>
+                                {
+                                    authOptions.ServerCertificateContext = sslContext;
+                                };
+                            });
+                        }
+                    });
+                    builder.ConfigureKestrel(serverOptions =>
+                    {
+                        serverOptions.AllowSynchronousIO = false;
+                        serverOptions.Limits.MaxRequestBodySize = null;
+                    });
+                    builder.UseStartup<Startup>();
+                });
+        }
+
+        public static ApplicationModes GetApplicationMode(IStartupContext startupContext)
+        {
+            if (startupContext.Help)
+            {
+                return ApplicationModes.Help;
+            }
+
+            if (OsInfo.IsWindows && startupContext.RegisterUrl)
+            {
+                return ApplicationModes.RegisterUrl;
+            }
+
+            if (OsInfo.IsWindows && startupContext.InstallService)
+            {
+                return ApplicationModes.InstallService;
+            }
+
+            if (OsInfo.IsWindows && startupContext.UninstallService)
+            {
+                return ApplicationModes.UninstallService;
+            }
+
+            // IsWindowsService can throw sometimes, so wrap it
+            var isWindowsService = false;
+            try
+            {
+                isWindowsService = WindowsServiceHelpers.IsWindowsService();
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, "Failed to get service status");
+            }
+
+            if (OsInfo.IsWindows && isWindowsService)
+            {
+                return ApplicationModes.Service;
+            }
+
+            return ApplicationModes.Interactive;
+        }
+
+        private static IConfiguration GetConfiguration(StartupContext context)
+        {
+            var appFolder = new AppFolderInfo(context);
+            var configPath = appFolder.GetConfigPath();
+
+            try
+            {
+                return new ConfigurationBuilder()
+                    .AddXmlFile(configPath, optional: true, reloadOnChange: false)
+                    .AddInMemoryCollection(new List<KeyValuePair<string, string>> { new("dataProtectionFolder", appFolder.GetDataProtectionPath()) })
+                    .AddEnvironmentVariables()
+                    .Build();
+            }
+            catch (InvalidDataException ex)
+            {
+                Logger.Error(ex, ex.Message);
+
+                throw new InvalidConfigFileException($"{configPath} is corrupt or invalid. Please delete the config file and Theoriarr will recreate it.", ex);
+            }
+        }
+
+        private static void ConfigureOptions(IServiceCollection services, IConfiguration config)
+        {
+            // Legacy sections first, unified section last so "Theoriarr:*" wins when present.
+            foreach (var prefix in ConfigSectionPrefixes.Reverse())
+            {
+                services.Configure<PostgresOptions>(config.GetSection($"{prefix}:Postgres"));
+                services.Configure<AppOptions>(config.GetSection($"{prefix}:App"));
+                services.Configure<AuthOptions>(config.GetSection($"{prefix}:Auth"));
+                services.Configure<ServerOptions>(config.GetSection($"{prefix}:Server"));
+                services.Configure<LogOptions>(config.GetSection($"{prefix}:Log"));
+                services.Configure<UpdateOptions>(config.GetSection($"{prefix}:Update"));
+                services.Configure<MetadataOptions>(config.GetSection($"{prefix}:Metadata"));
+            }
+
+            // The DB-backed Metadata Source setting is applied once at startup; a change requires
+            // a restart. Environment/JSON values still take precedence when set.
+            services.AddOptions<MetadataOptions>()
+                .PostConfigure<IConfigService>((options, configService) =>
+                {
+                    if (string.IsNullOrWhiteSpace(options.ProvidarrBaseUrl) &&
+                        !string.IsNullOrWhiteSpace(configService.ProvidarrBaseUrl))
+                    {
+                        options.ProvidarrBaseUrl = configService.ProvidarrBaseUrl.Trim();
+                    }
+                });
+        }
+
+        private static T GetServerValue<T>(IConfiguration config, string name)
+        {
+            return GetSectionValue<T>(config, "Server", name);
+        }
+
+        private static T GetSectionValue<T>(IConfiguration config, string section, string name)
+        {
+            foreach (var prefix in ConfigSectionPrefixes)
+            {
+                var value = config.GetValue<T>($"{prefix}:{section}:{name}");
+
+                if (value != null)
+                {
+                    return value;
+                }
+            }
+
+            return default;
+        }
+
+        private static string BuildUrl(string scheme, string bindAddress, int port)
+        {
+            return $"{scheme}://{bindAddress}:{port}";
+        }
+
+        private static SslStreamCertificateContext ValidateSslCertificate(string cert, string key, string password)
+        {
+            try
+            {
+                return SslCertificateLoader.LoadCertificateContext(cert, key, password);
+            }
+            catch (CryptographicException ex)
+            {
+                if (ex.HResult == 0x2 || ex.HResult == 0x2006D080)
+                {
+                    throw new SonarrStartupException(ex,
+                        $"The SSL certificate file {cert} does not exist");
+                }
+
+                throw new SonarrStartupException(ex);
+            }
+            catch (Exception ex)
+            {
+                throw new SonarrStartupException(ex);
+            }
+        }
+
+        private static bool RunWithRestartCheck(IHost host)
+        {
+            var shouldRestart = false;
+
+            var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+            lifetime.ApplicationStopped.Register(() =>
+            {
+                var runtimeInfo = host.Services.GetRequiredService<IRuntimeInfo>();
+                shouldRestart = runtimeInfo.RestartPending;
+            });
+
+            host.Run();
+            return shouldRestart;
+        }
+    }
+}

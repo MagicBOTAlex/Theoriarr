@@ -1,0 +1,30 @@
+# Version control
+# .git is intentionally kept: the build stage reads it (git rev-parse) to stamp the
+# commit into the diagnostics dump. It is never copied into the runtime image.
+
+# Installed dependencies / build outputs (rebuilt inside the image)
+**/node_modules
+**/_output
+**/_temp
+**/_tests
+**/_artifacts
+**/_cache
+
+# Runtime state
+_run
+
+# Nix results
+result
+result-*
+
+# Editor / OS cruft
+.direnv
+.vscode
+.idea
+*.log
+.DS_Store
+Thumbs.db
+
+# Docs / compose are not needed to build the image
+docker-compose*.yml
+*.md

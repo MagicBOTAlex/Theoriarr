@@ -1,0 +1,47 @@
+﻿using NLog;
+using NzbDrone.Core.DataAugmentation.Scene;
+using NzbDrone.Core.IndexerSearch.Definitions;
+using NzbDrone.Core.Parser.Model;
+
+namespace NzbDrone.Core.DecisionEngine.Specifications.Search
+{
+    public class SeasonMatchSpecification : DownloadDecisionEngineSpecification
+    {
+        private readonly Logger _logger;
+        private readonly ISceneMappingService _sceneMappingService;
+
+        public SeasonMatchSpecification(ISceneMappingService sceneMappingService, Logger logger)
+        {
+            _logger = logger;
+            _sceneMappingService = sceneMappingService;
+        }
+
+        public override SpecificationPriority Priority => SpecificationPriority.Default;
+        public override RejectionType Type => RejectionType.Permanent;
+
+        protected override DownloadSpecDecision IsSatisfiedBy(RemoteEpisode remoteEpisode, ReleaseDecisionInformation information)
+        {
+            if (information.SearchCriteria == null)
+            {
+                return DownloadSpecDecision.Accept();
+            }
+
+            var singleEpisodeSpec = information.SearchCriteria as SeasonSearchCriteria;
+
+            if (singleEpisodeSpec == null)
+            {
+                return DownloadSpecDecision.Accept();
+            }
+
+            var seasonNumber = remoteEpisode.ParsedEpisodeInfo.SeasonNumber ?? remoteEpisode.MappedSeasonNumber;
+
+            if (singleEpisodeSpec.SeasonNumber != seasonNumber)
+            {
+                _logger.Debug("Season number does not match searched season number, skipping.");
+                return DownloadSpecDecision.Reject(DownloadRejectionReason.WrongSeason, "Wrong season");
+            }
+
+            return DownloadSpecDecision.Accept();
+        }
+    }
+}

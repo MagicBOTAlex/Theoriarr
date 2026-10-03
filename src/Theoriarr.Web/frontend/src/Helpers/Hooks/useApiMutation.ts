@@ -1,0 +1,100 @@
+import { useMutation, UseMutationOptions } from '@tanstack/react-query';
+import ModelBase from 'App/ModelBase';
+import { getService, getServiceClientHeader, ServiceId } from 'Services';
+import {
+  ValidationError,
+  ValidationFailure,
+  ValidationWarning,
+} from 'typings/pending';
+import fetchJson, {
+  ApiError,
+  FetchJsonOptions,
+} from 'Utilities/Fetch/fetchJson';
+import getQueryPath from 'Utilities/Fetch/getQueryPath';
+import getQueryString, { QueryParams } from 'Utilities/Fetch/getQueryString';
+import { ValidationFailures } from 'Utilities/selectSettings';
+
+interface MutationOptions<T, TData>
+  extends Omit<FetchJsonOptions<TData>, 'method' | 'path'> {
+  method: 'POST' | 'PUT' | 'DELETE';
+
+  // A static path, or a resolver that builds the path from the mutation payload. Prefer the
+  // resolver whenever the path contains an id: React Query reads the observer's latest options
+  // when the mutation actually runs, so a path built from component state can go stale (e.g. the
+  // id is cleared right after triggering the mutation, yielding `.../profiles/undefined`).
+  path: string | ((data: TData) => string);
+  service?: ServiceId;
+  mutationOptions?: Omit<UseMutationOptions<T, ApiError, TData>, 'mutationFn'>;
+  queryParams?: QueryParams;
+}
+
+function useApiMutation<T, TData>(options: MutationOptions<T, TData>) {
+  const { path, service, queryParams, headers, ...otherOptions } = options;
+  const serviceId = service ?? 'series';
+
+  const requestOptions = {
+    ...otherOptions,
+    headers: {
+      ...headers,
+      'X-Api-Key': getService(serviceId).apiKey,
+      ...getServiceClientHeader(serviceId),
+    },
+  };
+
+  return useMutation<T, ApiError, TData>({
+    ...options.mutationOptions,
+    mutationFn: async (data?: TData) => {
+      const rawPath = typeof path === 'function' ? path(data as TData) : path;
+      const resolvedPath =
+        getQueryPath(rawPath, serviceId) + getQueryString(queryParams);
+
+      return fetchJson<T, TData>({
+        ...requestOptions,
+        path: resolvedPath,
+        body: data,
+      });
+    },
+  });
+}
+
+export default useApiMutation;
+
+export function getValidationFailures(
+  error?: ApiError | null
+): ValidationFailures {
+  if (!error || error.statusCode !== 400) {
+    return {
+      errors: [],
+      warnings: [],
+    };
+  }
+
+  return ((error.statusBody ?? []) as ValidationFailure[]).reduce(
+    (acc: ValidationFailures, failure: ValidationFailure) => {
+      if (failure.isWarning) {
+        acc.warnings.push(failure as ValidationWarning);
+      } else {
+        acc.errors.push(failure as ValidationError);
+      }
+
+      return acc;
+    },
+    {
+      errors: [],
+      warnings: [],
+    }
+  );
+}
+
+export function addOrUpdateQueryClientItem<
+  T extends ModelBase,
+  K extends keyof T
+>(oldData: T[] = [], newItem: T, key: K) {
+  const existingIndex = oldData.findIndex((item) => item[key] === newItem[key]);
+
+  if (existingIndex === -1) {
+    return [...oldData, newItem];
+  }
+
+  return oldData.map((item) => (item[key] === newItem[key] ? newItem : item));
+}

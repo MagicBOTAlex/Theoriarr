@@ -1,0 +1,80 @@
+Theoriarr — notices and attribution
+===================================
+
+Theoriarr is a unified fork/merge of two GPL-3.0 projects:
+
+  * Sonarr — https://github.com/Sonarr/Sonarr  (Team Sonarr)
+  * Radarr — https://github.com/Radarr/Radarr  (Team Radarr)
+
+This project contains code from both. All credit for the underlying applications
+belongs to their respective teams and contributors.
+
+Derived from:
+  - Sonarr v5-develop @ 76c684e0
+  - Radarr develop    @ 28900a86b
+
+License
+-------
+Theoriarr is distributed under the GNU General Public License, version 3.
+The full text is in `LICENSE`; the upstream copy is preserved at
+`src/Theoriarr.Series/LICENSE.md`. Copyright and license notices from Sonarr,
+Radarr and bundled third-party components are preserved in their original
+locations.
+
+Modification notice (GPLv3 §5(a))
+---------------------------------
+This is a modified version of Sonarr and Radarr. Modifications made 2026 by the
+Theoriarr project. The combined product is presented as "Theoriarr"; upstream
+files, copyright notices and license texts have not been removed.
+
+Theoriarr is not affiliated with or endorsed by Team Sonarr or Team Radarr.
+
+Bundled third-party components
+------------------------------
+This distribution bundles or links the following components. Their original
+copyright and license notices are retained where they appear in the source.
+
+  * Roboto font — Copyright 2011 Google Inc., Apache License 2.0.
+    Files: src/Theoriarr.Web/frontend/src/Content/Fonts/Roboto-*
+    License text: src/Theoriarr.Web/frontend/src/Content/Fonts/LICENSE-Roboto.txt
+
+  * Ubuntu Mono font — Copyright 2010 Canonical Ltd., Ubuntu Font Licence 1.0.
+    Files: src/Theoriarr.Web/frontend/src/Content/Fonts/UbuntuMono-Regular.*
+    License text: src/Theoriarr.Web/frontend/src/Content/Fonts/LICENSE-UbuntuMono.txt
+
+  * Font Awesome Free (icons CC BY 4.0, fonts SIL OFL 1.1, code MIT) —
+    https://fontawesome.com. Used via the @fortawesome/* npm packages.
+
+  * EnsureThat — Copyright Daniel Wertheim, MIT License —
+    https://github.com/danielwertheim/Ensure.That
+    Files: src/Theoriarr.Series/src/NzbDrone.Common/EnsureThat/*
+
+  * Expansive — Copyright anderly, Microsoft Public License (MS-PL) —
+    https://github.com/anderly/Expansive
+    Files: src/Theoriarr.Series/src/NzbDrone.Common/Expansive/*
+    License text: src/Theoriarr.Series/src/NzbDrone.Common/Expansive/license.txt
+
+  * OAuth — Copyright Daniel Crenna, public domain (CC0 1.0) —
+    https://github.com/danielcrenna/oauth
+    Files: src/Theoriarr.Series/src/NzbDrone.Common/OAuth/*
+    License text: src/Theoriarr.Series/src/NzbDrone.Common/OAuth/LICENSE
+
+  * LimitedConcurrencyLevelTaskScheduler — Microsoft, Microsoft Public License —
+    https://learn.microsoft.com/dotnet/api/system.threading.tasks.taskscheduler
+    File: src/Theoriarr.Series/src/NzbDrone.Common/TPL/LimitedConcurrencyLevelTaskScheduler.cs
+
+  * Happy Eyeballs implementation — derived from https://slugcat.systems,
+    https://github.com/dotnet/runtime/issues/26177
+    File: src/Theoriarr.Series/src/NzbDrone.Common/Http/HappyEyeballs/HappyEyeballs.cs
+
+  * TolerantEnumConverter — https://gist.github.com/gubenkoved/999eb73e227b7063a67a50401578c3a7
+    File: src/Theoriarr.Series/src/NzbDrone.Core/ImportLists/TolerantEnumConverter.cs
+
+  * ExpressionVisitor — copied from Mehfuz's LinqExtender —
+    http://mehfuzh.github.com/LinqExtender/
+    File: src/Theoriarr.Series/src/NzbDrone.Core/Datastore/ExpressionVisitor.cs
+
+  * Synology Download Station API error codes/messages, derived from the
+    Synology Download Station API documentation —
+    File: src/Theoriarr.Series/src/NzbDrone.Core/Download/Clients/DownloadStation/Responses/DiskStationError.cs
+

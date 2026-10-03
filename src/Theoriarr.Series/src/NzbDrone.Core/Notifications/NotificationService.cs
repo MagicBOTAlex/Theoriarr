@@ -1,0 +1,819 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using NLog;
+using NzbDrone.Common.EnvironmentInfo;
+using NzbDrone.Common.Extensions;
+using NzbDrone.Core.Download;
+using NzbDrone.Core.HealthCheck;
+using NzbDrone.Core.MediaFiles.Events;
+using NzbDrone.Core.Messaging.Events;
+using NzbDrone.Core.Movies;
+using NzbDrone.Core.Movies.Events;
+using NzbDrone.Core.Qualities;
+using NzbDrone.Core.ThingiProvider;
+using NzbDrone.Core.Tv;
+using NzbDrone.Core.Tv.Events;
+using NzbDrone.Core.Update.History.Events;
+
+namespace NzbDrone.Core.Notifications
+{
+    public class NotificationService
+        : IHandle<EpisodeGrabbedEvent>,
+          IHandle<EpisodeImportedEvent>,
+          IHandle<DownloadCompletedEvent>,
+          IHandle<UntrackedDownloadCompletedEvent>,
+          IHandle<SeriesRenamedEvent>,
+          IHandle<SeriesAddCompletedEvent>,
+          IHandle<SeriesDeletedEvent>,
+          IHandle<EpisodeFileDeletedEvent>,
+          IHandle<MovieRenamedEvent>,
+          IHandle<MovieGrabbedEvent>,
+          IHandle<MovieFileImportedEvent>,
+          IHandle<MoviesDeletedEvent>,
+          IHandle<MovieAddedEvent>,
+          IHandle<MoviesImportedEvent>,
+          IHandle<MovieFileDeletedEvent>,
+          IHandle<HealthCheckFailedEvent>,
+          IHandle<HealthCheckRestoredEvent>,
+          IHandle<UpdateInstalledEvent>,
+          IHandle<ManualInteractionRequiredEvent>,
+          IHandleAsync<DeleteCompletedEvent>,
+          IHandleAsync<DownloadsProcessedEvent>,
+          IHandleAsync<RenameCompletedEvent>,
+          IHandleAsync<HealthCheckCompleteEvent>
+    {
+        private readonly INotificationFactory _notificationFactory;
+        private readonly INotificationStatusService _notificationStatusService;
+        private readonly Logger _logger;
+
+        public NotificationService(INotificationFactory notificationFactory, INotificationStatusService notificationStatusService, Logger logger)
+        {
+            _notificationFactory = notificationFactory;
+            _notificationStatusService = notificationStatusService;
+            _logger = logger;
+        }
+
+        private string GetMessage(Series series, List<Episode> episodes, QualityModel quality)
+        {
+            var qualityString = GetQualityString(series, quality);
+
+            if (episodes.Empty())
+            {
+                return $"{series.Title} - [{qualityString}]";
+            }
+
+            if (series.SeriesType == SeriesTypes.Daily)
+            {
+                var episode = episodes.First();
+
+                return $"{series.Title} - {episode.AirDate} - {episode.Title} [{qualityString}]";
+            }
+
+            var episodeNumbers = string.Concat(episodes.Select(e => $"x{e.EpisodeNumber:00}"));
+
+            var episodeTitles = string.Join(" + ", episodes.Select(e => e.Title));
+
+            return $"{series.Title} - {episodes.First().SeasonNumber}{episodeNumbers} - {episodeTitles} [{qualityString}]";
+        }
+
+        private string GetFullSeasonMessage(Series series, int seasonNumber, QualityModel quality)
+        {
+            var qualityString = GetQualityString(series, quality);
+
+            return $"{series.Title} - Season {seasonNumber} [{qualityString}]";
+        }
+
+        private string GetQualityString(Series series, QualityModel quality)
+        {
+            var qualityString = quality.Quality.ToString();
+
+            if (quality.Revision.Version > 1)
+            {
+                if (series.SeriesType == SeriesTypes.Anime)
+                {
+                    qualityString += " v" + quality.Revision.Version;
+                }
+                else
+                {
+                    qualityString += " Proper";
+                }
+            }
+
+            return qualityString;
+        }
+
+        private string GetMessage(Movie movie, QualityModel quality)
+        {
+            var qualityString = quality.Quality.ToString();
+            var imdbUrl = "https://www.imdb.com/title/" + movie.MovieMetadata.Value.ImdbId + "/";
+
+            if (quality.Revision.Version > 1)
+            {
+                qualityString += " Proper";
+            }
+
+            return string.Format("{0} ({1}) [{2}] {3}",
+                                    movie.Title,
+                                    movie.Year,
+                                    qualityString,
+                                    imdbUrl);
+        }
+
+        private bool ShouldHandleSeries(ProviderDefinition definition, Series series)
+        {
+            if (definition.Tags.Empty())
+            {
+                _logger.Debug("No tags set for this notification.");
+                return true;
+            }
+
+            if (definition.Tags.Intersect(series.Tags).Any())
+            {
+                _logger.Debug("Notification and series have one or more intersecting tags.");
+                return true;
+            }
+
+            _logger.Debug("{0} does not have any intersecting tags with {1}. Notification will not be sent.", definition.Name, series.Title);
+            return false;
+        }
+
+        private bool ShouldHandleMovie(ProviderDefinition definition, Movie movie)
+        {
+            if (definition.Tags.Empty())
+            {
+                _logger.Debug("No tags set for this notification.");
+                return true;
+            }
+
+            if (movie == null)
+            {
+                _logger.Debug("{0} has tags but the movie is unknown. Notification will not be sent", definition.Name);
+                return false;
+            }
+
+            if (definition.Tags.Intersect(movie.Tags).Any())
+            {
+                _logger.Debug("Notification and movie have one or more intersecting tags.");
+                return true;
+            }
+
+            _logger.Debug("{0} does not have any intersecting tags with {1}. Notification will not be sent", definition.Name, movie.Title);
+            return false;
+        }
+
+        private bool ShouldHandleHealthFailure(HealthCheck.HealthCheck healthCheck, bool includeWarnings)
+        {
+            if (healthCheck.Type == HealthCheckResult.Error)
+            {
+                return true;
+            }
+
+            if (healthCheck.Type == HealthCheckResult.Warning && includeWarnings)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        public void Handle(EpisodeGrabbedEvent message)
+        {
+            var grabMessage = new GrabMessage
+            {
+                Message = GetMessage(message.Episode.Series, message.Episode.Episodes, message.Episode.ParsedEpisodeInfo.Quality),
+                Series = message.Episode.Series,
+                Quality = message.Episode.ParsedEpisodeInfo.Quality,
+                Episode = message.Episode,
+                DownloadClientType = message.DownloadClient,
+                DownloadClientName = message.DownloadClientName,
+                DownloadId = message.DownloadId
+            };
+
+            foreach (var notification in _notificationFactory.OnGrabEnabled())
+            {
+                try
+                {
+                    if (!ShouldHandleSeries(notification.Definition, message.Episode.Series))
+                    {
+                        continue;
+                    }
+
+                    notification.OnGrab(grabMessage);
+                    _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Error(ex, "Unable to send OnGrab notification to {0}", notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(MovieGrabbedEvent message)
+        {
+            var grabMessage = new GrabMessage
+            {
+                Message = GetMessage(message.Movie.Movie, message.Movie.ParsedMovieInfo.Quality),
+                Quality = message.Movie.ParsedMovieInfo.Quality,
+                Movie = message.Movie.Movie,
+                RemoteMovie = message.Movie,
+                DownloadClientType = message.DownloadClient,
+                DownloadClientName = message.DownloadClientName,
+                DownloadId = message.DownloadId
+            };
+
+            foreach (var notification in _notificationFactory.OnGrabEnabled())
+            {
+                try
+                {
+                    if (!ShouldHandleMovie(notification.Definition, message.Movie.Movie))
+                    {
+                        continue;
+                    }
+
+                    notification.OnGrab(grabMessage);
+                    _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Error(ex, "Unable to send OnGrab notification to {0}", notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(EpisodeImportedEvent message)
+        {
+            if (!message.NewDownload)
+            {
+                return;
+            }
+
+            var downloadMessage = new DownloadMessage
+            {
+                Message = GetMessage(message.EpisodeInfo.Series, message.EpisodeInfo.Episodes, message.EpisodeInfo.Quality),
+                Series = message.EpisodeInfo.Series,
+                EpisodeInfo = message.EpisodeInfo,
+                EpisodeFile = message.ImportedEpisode,
+                OldFiles = message.OldFiles,
+                SourcePath = message.EpisodeInfo.Path,
+                DownloadClientInfo = message.DownloadClientInfo,
+                DownloadId = message.DownloadId,
+                Release = message.EpisodeInfo.Release
+            };
+
+            foreach (var notification in _notificationFactory.OnDownloadEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleSeries(notification.Definition, message.EpisodeInfo.Series))
+                    {
+                        if (downloadMessage.OldFiles.Empty() || ((NotificationDefinition)notification.Definition).OnUpgrade)
+                        {
+                            notification.OnDownload(downloadMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnDownload notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(MovieFileImportedEvent message)
+        {
+            if (!message.NewDownload)
+            {
+                return;
+            }
+
+            var downloadMessage = new DownloadMessage
+            {
+                Message = GetMessage(message.MovieInfo.Movie, message.MovieInfo.Quality),
+                MovieInfo = message.MovieInfo,
+                MovieFile = message.ImportedMovie,
+                Movie = message.MovieInfo.Movie,
+                OldMovieFiles = message.OldFiles,
+                SourcePath = message.MovieInfo.Path,
+                DownloadClientInfo = message.DownloadClientInfo,
+                DownloadId = message.DownloadId,
+                Release = message.MovieInfo.Release
+            };
+
+            foreach (var notification in _notificationFactory.OnDownloadEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleMovie(notification.Definition, message.MovieInfo.Movie))
+                    {
+                        if (downloadMessage.OldMovieFiles.Empty() || ((NotificationDefinition)notification.Definition).OnUpgrade)
+                        {
+                            notification.OnDownload(downloadMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnDownload notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(DownloadCompletedEvent message)
+        {
+            if (message.TrackedDownload.RemoteEpisode == null)
+            {
+                return;
+            }
+
+            var series = message.TrackedDownload.RemoteEpisode.Series;
+            var episodes = message.TrackedDownload.RemoteEpisode.Episodes;
+            var parsedEpisodeInfo = message.TrackedDownload.RemoteEpisode.ParsedEpisodeInfo;
+
+            var downloadMessage = new ImportCompleteMessage
+            {
+                Message = parsedEpisodeInfo.FullSeason
+                    ? GetFullSeasonMessage(series, episodes.First().SeasonNumber, parsedEpisodeInfo.Quality)
+                    : GetMessage(series, episodes, parsedEpisodeInfo.Quality),
+                Series = series,
+                Episodes = episodes,
+                EpisodeFiles = message.EpisodeFiles,
+                DownloadClientInfo = message.TrackedDownload.DownloadItem.DownloadClientInfo,
+                DownloadId = message.TrackedDownload.DownloadItem.DownloadId,
+                Release = message.Release,
+                SourcePath = message.TrackedDownload.DownloadItem.OutputPath.FullPath,
+                DestinationPath = message.EpisodeFiles.Select(e => Path.Join(series.Path, e.RelativePath)).ToList().GetLongestCommonPath(),
+                ReleaseGroup = parsedEpisodeInfo.ReleaseGroup,
+                ReleaseQuality = parsedEpisodeInfo.Quality
+            };
+
+            foreach (var notification in _notificationFactory.OnImportCompleteEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleSeries(notification.Definition, series))
+                    {
+                        if (((NotificationDefinition)notification.Definition).OnImportComplete)
+                        {
+                            notification.OnImportComplete(downloadMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnImportComplete notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(UntrackedDownloadCompletedEvent message)
+        {
+            var series = message.Series;
+            var episodes = message.Episodes;
+            var parsedEpisodeInfo = message.ParsedEpisodeInfo;
+
+            var downloadMessage = new ImportCompleteMessage
+            {
+                Message = parsedEpisodeInfo.FullSeason
+                    ? GetFullSeasonMessage(series, episodes.First().SeasonNumber, parsedEpisodeInfo.Quality)
+                    : GetMessage(series, episodes, parsedEpisodeInfo.Quality),
+                Series = series,
+                Episodes = episodes,
+                EpisodeFiles = message.EpisodeFiles,
+                SourcePath = message.SourcePath,
+                SourceTitle = parsedEpisodeInfo.ReleaseTitle,
+                DestinationPath = message.EpisodeFiles.Select(e => Path.Join(series.Path, e.RelativePath)).ToList().GetLongestCommonPath(),
+                ReleaseGroup = parsedEpisodeInfo.ReleaseGroup,
+                ReleaseQuality = parsedEpisodeInfo.Quality
+            };
+
+            foreach (var notification in _notificationFactory.OnImportCompleteEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleSeries(notification.Definition, series))
+                    {
+                        if (((NotificationDefinition)notification.Definition).OnImportComplete)
+                        {
+                            notification.OnImportComplete(downloadMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnImportComplete notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(SeriesRenamedEvent message)
+        {
+            foreach (var notification in _notificationFactory.OnRenameEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleSeries(notification.Definition, message.Series))
+                    {
+                        notification.OnRename(message.Series, message.RenamedFiles);
+                        _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnRename notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(MovieRenamedEvent message)
+        {
+            foreach (var notification in _notificationFactory.OnRenameEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleMovie(notification.Definition, message.Movie))
+                    {
+                        notification.OnMovieRename(message.Movie, message.RenamedFiles);
+                        _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnRename notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(UpdateInstalledEvent message)
+        {
+            var updateMessage = new ApplicationUpdateMessage();
+            updateMessage.Message = $"{BuildInfo.AppName} updated from {message.PreviousVerison.ToString()} to {message.NewVersion.ToString()}";
+            updateMessage.PreviousVersion = message.PreviousVerison;
+            updateMessage.NewVersion = message.NewVersion;
+
+            foreach (var notification in _notificationFactory.OnApplicationUpdateEnabled())
+            {
+                try
+                {
+                    notification.OnApplicationUpdate(updateMessage);
+                    _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnApplicationUpdate notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(ManualInteractionRequiredEvent message)
+        {
+            var series = message.Episode?.Series;
+            var movie = message.RemoteMovie?.Movie;
+            var mess = "";
+
+            if (series != null)
+            {
+                mess = GetMessage(series, message.Episode.Episodes, message.Episode.ParsedEpisodeInfo.Quality);
+            }
+            else if (movie != null)
+            {
+                mess = GetMessage(movie, message.RemoteMovie.ParsedMovieInfo.Quality);
+            }
+
+            if (mess.IsNullOrWhiteSpace() && message.TrackedDownload.DownloadItem != null)
+            {
+                mess = message.TrackedDownload.DownloadItem.Title;
+            }
+
+            if (mess.IsNullOrWhiteSpace())
+            {
+                return;
+            }
+
+            var manualInteractionMessage = new ManualInteractionRequiredMessage
+            {
+                Message = mess,
+                Series = series,
+                Episode = message.Episode,
+                Movie = movie,
+                RemoteMovie = message.RemoteMovie,
+                Quality = message.Episode?.ParsedEpisodeInfo.Quality ?? message.RemoteMovie?.ParsedMovieInfo?.Quality,
+                TrackedDownload = message.TrackedDownload,
+                DownloadClientInfo = message.TrackedDownload.DownloadItem?.DownloadClientInfo,
+                DownloadId = message.TrackedDownload.DownloadItem?.DownloadId,
+                Release = message.Release
+            };
+
+            foreach (var notification in _notificationFactory.OnManualInteractionEnabled())
+            {
+                try
+                {
+                    if (series != null && !ShouldHandleSeries(notification.Definition, series))
+                    {
+                        continue;
+                    }
+
+                    if (movie != null && !ShouldHandleMovie(notification.Definition, movie))
+                    {
+                        continue;
+                    }
+
+                    notification.OnManualInteractionRequired(manualInteractionMessage);
+                    _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Error(ex, "Unable to send OnManualInteractionRequired notification to {0}", notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(EpisodeFileDeletedEvent message)
+        {
+            if (message.EpisodeFile.Episodes.Value.Empty())
+            {
+                _logger.Trace("Skipping notification for deleted file without an episode (episode metadata was removed)");
+
+                return;
+            }
+
+            var deleteMessage = new EpisodeDeleteMessage();
+            deleteMessage.Message = GetMessage(message.EpisodeFile.Series, message.EpisodeFile.Episodes, message.EpisodeFile.Quality);
+            deleteMessage.Series = message.EpisodeFile.Series;
+            deleteMessage.EpisodeFile = message.EpisodeFile;
+            deleteMessage.Reason = message.Reason;
+
+            foreach (var notification in _notificationFactory.OnEpisodeFileDeleteEnabled())
+            {
+                try
+                {
+                    if (message.Reason != MediaFiles.DeleteMediaFileReason.Upgrade || ((NotificationDefinition)notification.Definition).OnEpisodeFileDeleteForUpgrade)
+                    {
+                        if (ShouldHandleSeries(notification.Definition, deleteMessage.EpisodeFile.Series))
+                        {
+                            notification.OnEpisodeFileDelete(deleteMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnEpisodeFileDelete notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(MovieFileDeletedEvent message)
+        {
+            var deleteMessage = new MovieFileDeleteMessage();
+            deleteMessage.Message = GetMessage(message.MovieFile.Movie, message.MovieFile.Quality);
+            deleteMessage.MovieFile = message.MovieFile;
+            deleteMessage.Movie = message.MovieFile.Movie;
+            deleteMessage.Reason = message.Reason;
+
+            foreach (var notification in _notificationFactory.OnMovieFileDeleteEnabled())
+            {
+                try
+                {
+                    if (message.Reason != MediaFiles.DeleteMediaFileReason.Upgrade || ((NotificationDefinition)notification.Definition).OnMovieFileDeleteForUpgrade)
+                    {
+                        if (ShouldHandleMovie(notification.Definition, message.MovieFile.Movie))
+                        {
+                            notification.OnMovieFileDelete(deleteMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnMovieFileDelete notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(SeriesAddCompletedEvent message)
+        {
+            var series = message.Series;
+            var addMessage = new SeriesAddMessage
+            {
+                Series = series,
+                Message = series.Title
+            };
+
+            foreach (var notification in _notificationFactory.OnSeriesAddEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleSeries(notification.Definition, series))
+                    {
+                        notification.OnSeriesAdd(addMessage);
+                        _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnSeriesAdd notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(MovieAddedEvent message)
+        {
+            foreach (var notification in _notificationFactory.OnMovieAddedEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleMovie(notification.Definition, message.Movie))
+                    {
+                        notification.OnMovieAdded(message.Movie);
+                        _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnMovieAdded notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(MoviesImportedEvent message)
+        {
+            foreach (var notification in _notificationFactory.OnMovieAddedEnabled())
+            {
+                try
+                {
+                    foreach (var movie in message.Movies)
+                    {
+                        if (ShouldHandleMovie(notification.Definition, movie))
+                        {
+                            notification.OnMovieAdded(movie);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnMovieAdded notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(SeriesDeletedEvent message)
+        {
+            foreach (var series in message.Series)
+            {
+                var deleteMessage = new SeriesDeleteMessage(series, message.DeleteFiles);
+
+                foreach (var notification in _notificationFactory.OnSeriesDeleteEnabled())
+                {
+                    try
+                    {
+                        if (ShouldHandleSeries(notification.Definition, deleteMessage.Series))
+                        {
+                            notification.OnSeriesDelete(deleteMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _notificationStatusService.RecordFailure(notification.Definition.Id);
+                        _logger.Warn(ex, "Unable to send OnSeriesDelete notification to: " + notification.Definition.Name);
+                    }
+                }
+            }
+        }
+
+        public void Handle(MoviesDeletedEvent message)
+        {
+            foreach (var movie in message.Movies)
+            {
+                var deleteMessage = new MovieDeleteMessage(movie, message.DeleteFiles);
+
+                foreach (var notification in _notificationFactory.OnMovieDeleteEnabled())
+                {
+                    try
+                    {
+                        if (ShouldHandleMovie(notification.Definition, deleteMessage.Movie))
+                        {
+                            notification.OnMovieDelete(deleteMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _notificationStatusService.RecordFailure(notification.Definition.Id);
+                        _logger.Warn(ex, "Unable to send OnMovieDelete notification to: " + notification.Definition.Name);
+                    }
+                }
+            }
+        }
+
+        public void Handle(HealthCheckFailedEvent message)
+        {
+            // Don't send health check notifications during the start up grace period,
+            // once that duration expires they they'll be retested and fired off if necessary.
+
+            if (message.IsInStartupGracePeriod)
+            {
+                return;
+            }
+
+            foreach (var notification in _notificationFactory.OnHealthIssueEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleHealthFailure(message.HealthCheck, ((NotificationDefinition)notification.Definition).IncludeHealthWarnings))
+                    {
+                        notification.OnHealthIssue(message.HealthCheck);
+                        _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnHealthIssue notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(HealthCheckRestoredEvent message)
+        {
+            if (message.IsInStartupGracePeriod)
+            {
+                return;
+            }
+
+            foreach (var notification in _notificationFactory.OnHealthRestoredEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleHealthFailure(message.PreviousCheck, ((NotificationDefinition)notification.Definition).IncludeHealthWarnings))
+                    {
+                        notification.OnHealthRestored(message.PreviousCheck);
+                        _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnHealthRestored notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void HandleAsync(DeleteCompletedEvent message)
+        {
+            ProcessQueue();
+        }
+
+        public void HandleAsync(DownloadsProcessedEvent message)
+        {
+            ProcessQueue();
+        }
+
+        public void HandleAsync(RenameCompletedEvent message)
+        {
+            ProcessQueue();
+        }
+
+        public void HandleAsync(HealthCheckCompleteEvent message)
+        {
+            ProcessQueue();
+        }
+
+        private void ProcessQueue()
+        {
+            foreach (var notification in _notificationFactory.GetAvailableProviders())
+            {
+                try
+                {
+                    notification.ProcessQueue();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn(ex, "Unable to process notification queue for " + notification.Definition.Name);
+                }
+            }
+        }
+    }
+}

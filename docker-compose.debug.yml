@@ -1,0 +1,16 @@
+# Debug override: builds the unified backend in the Debug configuration, which
+# enables the anonymous diagnostics endpoint (GET /api/v3/system/diagnostics)
+# and the "Download Diagnostics" button on System -> Logs.
+#
+# Use it layered on top of the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d --build
+#
+# The image is tagged magicbotalex2/theoriarr:Debug so it does not clobber the
+# release magicbotalex2/theoriarr:latest image. Rebuild without -f to return to a
+# release build.
+services:
+  theoriarr:
+    build:
+      args:
+        CONFIGURATION: Debug
+    image: magicbotalex2/theoriarr:Debug

@@ -1,0 +1,26 @@
+# Build outputs
+_output/
+_temp/
+_tests/
+_artifacts/
+_cache/
+_run/
+node_modules/
+
+# MSBuild solution artifacts
+*.sln.metaproj
+*.sln.metaproj.tmp
+Directory.Solution.targets
+
+# Logs / OS cruft
+*.log
+.DS_Store
+Thumbs.db
+
+# Out-of-repo real-world test fixtures (see docs/PROBLEMS.md U23)
+theoriarr-test-fixtures.json
+
+# Nix
+/result
+/result-*
+.direnv/
