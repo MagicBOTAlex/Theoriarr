@@ -59,16 +59,41 @@ Building requires the .NET SDK 10 and Node 24 (Node is only needed to build the 
 
 ### Docker
 
+The image is published on Docker Hub as
+[`magicbotalex2/theoriarr`](https://hub.docker.com/r/magicbotalex2/theoriarr) (`:latest`, or
+`:Debug` for the debug-only diagnostics endpoint). A minimal `docker-compose.yml`:
+
+```yaml
+services:
+  theoriarr:
+    image: magicbotalex2/theoriarr:latest
+    container_name: theoriarr
+    restart: unless-stopped
+    ports:
+      - "6868:6868"
+    environment:
+      PUID: 1654 # uid the service runs as (match your host user)
+      PGID: 1654 # gid the service runs as
+      TZ: UTC
+    volumes:
+      - theoriarr-data:/data
+      - theoriarr-transcode:/transcode
+
+volumes:
+  theoriarr-data:
+  theoriarr-transcode:
+```
+
 ```bash
-docker compose up -d --build
+docker compose up -d          # pulls magicbotalex2/theoriarr:latest
 ```
 
 The entrypoint starts as root only to repair the ownership of the mounted volumes, then drops to
 the non-root `app` user (uid/gid 1654, override with `PUID`/`PGID`) for the service itself. It
 listens on `:6868` and keeps config, databases, logs and media metadata in the `theoriarr-data`
-volume (transcode scratch lives in `theoriarr-transcode`). See
-[`docker-compose.yml`](docker-compose.yml) for the optional NVIDIA / VA-API GPU blocks;
-`CONFIGURATION=Debug` enables the debug-only diagnostics endpoint.
+volume (transcode scratch lives in `theoriarr-transcode`). The bundled
+[`docker-compose.yml`](docker-compose.yml) adds the optional NVIDIA / VA-API GPU blocks; build from
+source instead with `docker compose up -d --build`.
 
 ### Nix
 
